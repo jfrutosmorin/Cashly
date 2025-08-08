@@ -1,0 +1,136 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>Mis Finanzas</title>
+  <link rel="manifest" href="manifest.webmanifest">
+  <meta name="theme-color" content="#0f172a">
+  <link rel="apple-touch-icon" href="assets/icon-192.png">
+  <link rel="stylesheet" href="styles.css">
+  <link rel="preconnect" href="https://cdn.jsdelivr.net">
+  <link rel="preconnect" href="https://www.gstatic.com" crossorigin>
+  <link rel="preconnect" href="https://www.googleapis.com" crossorigin>
+  <script defer src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+  <script defer src="firebase.js"></script>
+  <script defer src="app.js"></script>
+</head>
+<body>
+<header class="app-bar">
+  <div class="title">Mis Finanzas</div>
+  <div class="spacer"></div>
+  <button id="btnExport" class="icon-btn" title="Exportar JSON">⤴︎</button>
+  <label class="file-label" title="Importar JSON">
+    ⤵︎ <input type="file" id="fileImport" accept="application/json" hidden>
+  </label>
+</header>
+
+<main>
+  <section class="summary">
+    <div class="month-select">
+      <button id="prevMonth" aria-label="Mes anterior">‹</button>
+      <span id="currentMonth">—</span>
+      <button id="nextMonth" aria-label="Mes siguiente">›</button>
+    </div>
+    <div class="cards">
+      <div class="card">
+        <div class="card-title">Ingresos</div>
+        <div id="incomeTotal" class="card-value">—</div>
+      </div>
+      <div class="card">
+        <div class="card-title">Gastos</div>
+        <div id="expenseTotal" class="card-value">—</div>
+      </div>
+      <div class="card highlight">
+        <div class="card-title">Saldo del mes</div>
+        <div id="balance" class="card-value">—</div>
+      </div>
+    </div>
+    <canvas id="chartCategories" height="160"></canvas>
+  </section>
+
+  <section class="list">
+    <h2>Movimientos</h2>
+    <ul id="txList" class="tx-list"></ul>
+    <div id="emptyState" class="empty">Aún no hay movimientos este mes.</div>
+  </section>
+</main>
+
+<button id="fabAdd" class="fab" aria-label="Añadir">＋</button>
+
+<dialog id="dlgTx" class="sheet">
+  <form method="dialog" id="txForm">
+    <h3 id="dlgTitle">Nuevo movimiento</h3>
+    <div class="segmented">
+      <input type="radio" id="typeIncome" name="type" value="income" checked>
+      <label for="typeIncome">Ingreso</label>
+      <input type="radio" id="typeExpense" name="type" value="expense">
+      <label for="typeExpense">Gasto</label>
+    </div>
+
+    <label class="field">
+      <span>Importe (€)</span>
+      <input type="number" step="0.01" min="0" id="amount" required inputmode="decimal" placeholder="0,00">
+    </label>
+
+    <label class="field">
+      <span>Categoría</span>
+      <select id="category" required></select>
+    </label>
+
+    <label class="field">
+      <span>Fecha</span>
+      <input type="date" id="date" required>
+    </label>
+
+    <label class="field">
+      <span>Nota</span>
+      <input type="text" id="note" maxlength="120" placeholder="Opcional">
+    </label>
+
+    <details class="field">
+      <summary>Repetición (opcional)</summary>
+      <label class="subfield">
+        <span>Frecuencia</span>
+        <select id="recurringFreq">
+          <option value="">—</option>
+          <option value="monthly">Mensual</option>
+          <option value="weekly">Semanal</option>
+        </select>
+      </label>
+      <label class="subfield">
+        <span>Hasta (incl.)</span>
+        <input type="date" id="recurringEndsOn">
+      </label>
+    </details>
+
+    <menu>
+      <button value="cancel" id="btnCancel">Cancelar</button>
+      <button id="btnSave" value="default">Guardar</button>
+    </menu>
+  </form>
+</dialog>
+
+<dialog id="dlgConfirm" class="sheet small">
+  <form method="dialog">
+    <p id="confirmText">¿Seguro?</p>
+    <menu>
+      <button value="cancel">No</button>
+      <button value="ok" class="danger">Sí</button>
+    </menu>
+  </form>
+</dialog>
+
+<footer class="foot-note">
+  <small id="authInfo">Offline</small>
+</footer>
+
+<script>
+  if ('serviceWorker' in navigator) {
+    window.addEventListener('load', () => {
+      navigator.serviceWorker.register('/sw.js').catch(console.error);
+    });
+  }
+</script>
+</body>
+</html>
