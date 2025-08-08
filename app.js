@@ -3,7 +3,18 @@ const fmtEUR = new Intl.NumberFormat('es-ES', { style:'currency', currency:'EUR'
 const monthNames = ['Ene','Feb','Mar','Abr','May','Jun','Jul','Ago','Sep','Oct','Nov','Dic'];
 const todayISO = () => new Date().toISOString().slice(0,10);
 const toMonthKey = (d) => `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`;
-const parseAmountToCents = (value) => Math.round(parseFloat(String(value).replace(',', '.')) * 100);
+const parseAmountToCents = (value) => {
+  if (value == null) return NaN;
+  // quita espacios, € y separadores de millar, y normaliza la coma
+  const s = String(value).trim()
+    .replace(/\s/g,'')
+    .replace(/€/g,'')
+    .replace(/\./g,'')      // puntos como miles: 1.234 -> 1234
+    .replace(',', '.');     // coma decimal -> punto
+  const n = Number(s);
+  if (!Number.isFinite(n)) return NaN;
+  return Math.round(n * 100);
+};
 const centsToEUR = (c) => fmtEUR.format((c||0)/100);
 
 // Categorías iniciales
@@ -219,14 +230,14 @@ el.form.addEventListener('submit', async (e) => {
   if (!data.date) { alert('Fecha requerida'); return; }
   const id = el.dlg.dataset.editing || null;
   await window.__actions.saveTx({
-    type: data.type,
-    amount: data.amount,
-    category: data.category,
-    date: data.date,
-    note: data.note,
-    recurringFreq: data.get('recurringFreq') || document.getElementById('recurringFreq').value,
-    recurringEndsOn: document.getElementById('recurringEndsOn').value
-  }, id);
+  type: data.type,
+  amount: data.amount,
+  category: data.category,
+  date: data.date,
+  note: data.note,
+  recurringFreq: document.getElementById('recurringFreq').value,
+  recurringEndsOn: document.getElementById('recurringEndsOn').value
+}, id);
   el.dlg.close();
 });
 
