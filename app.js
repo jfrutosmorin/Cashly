@@ -5,19 +5,17 @@ const todayISO = () => new Date().toISOString().slice(0,10);
 const toMonthKey = (d) => `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`;
 const parseAmountToCents = (value) => {
   if (value == null) return NaN;
-  // Normalizar: quitar espacios, símbolo €, y convertir coma a punto
+
+  // Convertir a string, quitar espacios, símbolo €, separadores de millar, etc.
   let s = String(value)
-    .trim()
-    .replace(/\s+/g, '')  // espacios
-    .replace(/€/g, '')    // símbolo €
-    .replace(/\./g, '')   // separadores de millar
-    .replace(/,/g, '.');  // coma decimal → punto
-  
-  // Safari a veces mete caracteres invisibles, los quitamos:
-  s = s.replace(/[^\d.-]/g, '');
+    .normalize('NFKC') // normaliza caracteres Unicode raros
+    .replace(/[^\d,.\-]/g, '') // elimina cualquier caracter no numérico, salvo . , -
+    .replace(/\./g, '')        // quita separadores de miles (.)
+    .replace(',', '.');        // cambia coma decimal a punto
 
   const n = parseFloat(s);
   if (isNaN(n)) return NaN;
+
   return Math.round(n * 100);
 };
 const centsToEUR = (c) => fmtEUR.format((c||0)/100);
