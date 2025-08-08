@@ -32,14 +32,15 @@ import('https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js').then(({ ini
 
     // Escuchar cambios de sesión
     onAuthStateChanged(auth, (user) => {
-      if (user) {
-        console.log("✅ Usuario autenticado:", user.email || user.uid);
-        window.__firebase.user = user;
-        document.dispatchEvent(new CustomEvent('firebase-ready'));
-      } else {
-        console.log("🚪 Usuario no autenticado");
-      }
-    });
+  if (user) {
+    console.log("✅ Usuario autenticado:", user.email || user.uid);
+    window.__firebase.user = user;
+    document.dispatchEvent(new CustomEvent('firebase-ready'));
+  } else {
+    const dlg = document.getElementById('authDialog');
+    if (dlg && !dlg.open) dlg.showModal(); // <-- muestra login si no hay sesión
+  }
+});
   });
 }).catch(err => {
   console.error(err);
