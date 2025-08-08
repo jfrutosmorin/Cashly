@@ -75,7 +75,7 @@
 
     <label class="field">
       <span>Categoría</span>
-      <select id="category" required></select>
+      <select id="category" name="category" required></select>
     </label>
 
     <label class="field">
@@ -85,14 +85,14 @@
 
     <label class="field">
       <span>Nota</span>
-      <input type="text" id="note" maxlength="120" placeholder="Opcional">
+      <input type="text" id="note" name="note" maxlength="120" placeholder="Opcional">
     </label>
 
     <details class="field">
       <summary>Repetición (opcional)</summary>
       <label class="subfield">
         <span>Frecuencia</span>
-        <select id="recurringFreq">
+        <select id="recurringFreq" name="recurringFreq">
           <option value="">—</option>
           <option value="monthly">Mensual</option>
           <option value="weekly">Semanal</option>
@@ -100,7 +100,7 @@
       </label>
       <label class="subfield">
         <span>Hasta (incl.)</span>
-        <input type="date" id="recurringEndsOn">
+        <input type="date" id="recurringEndsOn" name="recurringEndsOn">
       </label>
     </details>
 
