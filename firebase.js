@@ -9,54 +9,38 @@ const firebaseConfig = {
   measurementId: "G-1CC2RFGNQD"
 };
 
-// Inicialización modular Firebase v10
+// Carga modular por CDN
 import('https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js').then(({ initializeApp }) => {
+  // Inicializar app
   const app = initializeApp(firebaseConfig);
 
   return Promise.all([
     import('https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js'),
     import('https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js')
   ]).then(([authMod, fsMod]) => {
-    const { 
-      getAuth, 
-      onAuthStateChanged, 
-      signInWithEmailAndPassword, 
-      createUserWithEmailAndPassword, 
-      signOut 
-    } = authMod;
+    const { getAuth, onAuthStateChanged, createUserWithEmailAndPassword, signInWithEmailAndPassword, signOut } = authMod;
     const { getFirestore, enableIndexedDbPersistence } = fsMod;
 
     const auth = getAuth(app);
     const db = getFirestore(app);
 
-    // Permitir cache offline
-    enableIndexedDbPersistence(db).catch(() => {
-      console.warn("IndexedDB no disponible (modo privado u otra limitación)");
-    });
+    // Habilitar persistencia offline para Firestore
+    enableIndexedDbPersistence(db).catch(() => { /* Safari Private Mode u otros casos */ });
 
-    // Guardamos en global para poder usar en app.js
-    window.__firebase = { app, auth, db };
+    // Guardar funciones de auth en window para poder llamarlas desde la UI
+    window.__firebase = { app, auth, db, createUserWithEmailAndPassword, signInWithEmailAndPassword, signOut };
 
-    // Escucha cambios de autenticación
+    // Escuchar cambios de sesión
     onAuthStateChanged(auth, (user) => {
       if (user) {
+        console.log("✅ Usuario autenticado:", user.email || user.uid);
         window.__firebase.user = user;
         document.dispatchEvent(new CustomEvent('firebase-ready'));
       } else {
-        // Si no hay usuario, mostrar diálogo de login
-        const dlg = document.getElementById('authDialog');
-        if (dlg) dlg.showModal();
+        console.log("🚪 Usuario no autenticado");
       }
     });
-
-    // Exponer helpers de login/registro/cerrar sesión globalmente
-    window.__authActions = {
-      login: (email, password) => signInWithEmailAndPassword(auth, email, password),
-      register: (email, password) => createUserWithEmailAndPassword(auth, email, password),
-      logout: () => signOut(auth)
-    };
   });
-
 }).catch(err => {
   console.error(err);
   alert('Error cargando Firebase. Revisa firebase.js');
