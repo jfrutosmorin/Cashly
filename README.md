@@ -1,6 +1,6 @@
 # Mis Finanzas — PWA con Firebase (A2)
 
-Aplicación web instalable (PWA) para iPhone/iPad y desktop, con **sincronización entre dispositivos** usando **Firebase** (Auth anónima + Firestore con persistencia offline).
+Aplicación web instalable (PWA) para iPhone/iPad y desktop, con **sincronización entre dispositivos** usando **Firebase** (Auth anónima + Firestore).
 
 ## 1) Crea tu proyecto en Firebase (gratis)
 1. Ve a https://console.firebase.google.com → *Add project* → elige un nombre (p.ej. `mis-finanzas`).
