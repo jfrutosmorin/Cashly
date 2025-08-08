@@ -231,7 +231,7 @@ el.form.addEventListener('submit', async (e) => {
   const data = Object.fromEntries(fd.entries());
   const parsedAmount = parseAmountToCents(data.amount);
   if (!data.amount || isNaN(parsedAmount)) {
-    alert('Importe inválido');
+    alert(`🧪 Importe introducido: "${data.amount}"\n🔍 Parseado: ${parsedAmount}`);
     return;
   }
   if (!data.date) {
