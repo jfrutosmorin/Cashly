@@ -153,25 +153,63 @@ document.addEventListener('firebase-ready', () => {
 
 // Render lista + totales + gráfico
 function refreshList(){
+  // Rango del mes visible
   const [y,m] = state.month.split('-').map(Number);
   const first = new Date(y, m-1, 1);
-  const last = new Date(y, m, 0);
-  const inMonth = state.txs.filter(t => {
-    const d = new Date(t.date+'T00:00:00');
-    return d >= first && d <= last;
+  const last  = new Date(y, m,   0);
+
+  // Función robusta para obtener Date desde el doc (string o Timestamp)
+  const toDateObj = (t) => {
+    const v = t.date;
+    // Firestore Timestamp
+    if (v && typeof v.toDate === 'function') return v.toDate();
+    // String tipo "YYYY-MM-DD"
+    if (typeof v === 'string') {
+      const s = v.trim().slice(0,10);
+      const d = new Date(s + 'T00:00:00');
+      if (!isNaN(d)) return d;
+    }
+    return null; // inválida
+  };
+
+  // Mapear docs -> con fecha válida
+  let valid = 0, invalid = 0;
+  const details = [];
+  const txs = state.txs.map(t => {
+    const d = toDateObj(t);
+    if (d) { valid++; } else { invalid++; }
+    details.push(`${(t.id||'').slice(0,6)} date=${t.date} -> ${d ? d.toISOString().slice(0,10) : 'INVALID'}`);
+    return { ...t, __dateObj: d };
   });
 
+  // Filtrar por mes visible
+  const inMonth = txs.filter(t => t.__dateObj && t.__dateObj >= first && t.__dateObj <= last);
+
+  // ⚠️ Alerta de depuración (muestra hasta 6 ejemplos)
+  alert(
+    `DEBUG fechas\n` +
+    `state.month = ${state.month}\n` +
+    `docs totales = ${state.txs.length}\n` +
+    `fechas válidas = ${valid}\n` +
+    `fechas inválidas = ${invalid}\n` +
+    `en mes actual = ${inMonth.length}\n\n` +
+    details.slice(0,6).join('\n')
+  );
+
+  // ---- A partir de aquí, lo de siempre pero usando inMonth ----
+
   // Totales
-  const income = inMonth.filter(t=>t.type==='income').reduce((s,t)=>s+(t.amountCents||0),0);
+  const income  = inMonth.filter(t=>t.type==='income' ).reduce((s,t)=>s+(t.amountCents||0),0);
   const expense = inMonth.filter(t=>t.type==='expense').reduce((s,t)=>s+(t.amountCents||0),0);
   const balance = income - expense;
-  el.incomeTotal.textContent = centsToEUR(income);
+  el.incomeTotal.textContent  = centsToEUR(income);
   el.expenseTotal.textContent = centsToEUR(expense);
-  el.balance.textContent = centsToEUR(balance);
+  el.balance.textContent      = centsToEUR(balance);
 
   // Lista
   el.txList.innerHTML = '';
-  if (!inMonth.length){ el.empty.style.display='block'; } else { el.empty.style.display='none'; }
+  el.empty.style.display = inMonth.length ? 'none' : 'block';
+
   inMonth.forEach(t => {
     const li = document.createElement('li');
     li.className = `tx ${t.type}`;
@@ -181,7 +219,7 @@ function refreshList(){
       <div class="emoji">${cat.emoji||'🏷️'}</div>
       <div class="main">
         <div class="title">${cat.name} · ${amountStr}</div>
-        <div class="sub">${t.note ? (t.note + ' · ') : ''}${new Date(t.date).toLocaleDateString('es-ES')}</div>
+        <div class="sub">${t.note ? (t.note + ' · ') : ''}${(t.__dateObj||new Date()).toLocaleDateString('es-ES')}</div>
       </div>
       <div class="actions">
         <button data-id="${t.id}" class="edit">Editar</button>
@@ -195,6 +233,7 @@ function refreshList(){
   el.txList.querySelectorAll('button.edit').forEach(b => b.addEventListener('click', () => openEdit(b.dataset.id)));
   el.txList.querySelectorAll('button.del').forEach(b => b.addEventListener('click', () => confirmDelete(b.dataset.id)));
 
+  // Gráfico
   renderChart(inMonth);
 }
 
