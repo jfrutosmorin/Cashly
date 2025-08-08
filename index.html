@@ -15,6 +15,23 @@
   <script defer src="firebase.js"></script>
   <script defer src="app.js"></script>
 </head>
+<dialog id="authDialog" class="sheet">
+  <form method="dialog" id="authForm">
+    <h3>Iniciar sesión</h3>
+    <label class="field">
+      <span>Email</span>
+      <input type="email" id="authEmail" required>
+    </label>
+    <label class="field">
+      <span>Contraseña</span>
+      <input type="password" id="authPassword" required>
+    </label>
+    <menu>
+      <button type="button" id="btnRegister">Registrarse</button>
+      <button type="submit" id="btnLogin">Entrar</button>
+    </menu>
+  </form>
+</dialog>
 <body>
 <header class="app-bar">
   <div class="title">Mis Finanzas</div>
@@ -23,6 +40,7 @@
   <label class="file-label" title="Importar JSON">
     ⤵︎ <input type="file" id="fileImport" accept="application/json" hidden>
   </label>
+  <button id="btnLogout" class="icon-btn" title="Cerrar sesión">⎋</button>
 </header>
 
 <main>
