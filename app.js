@@ -227,28 +227,47 @@ document.getElementById('fabAdd').addEventListener('click', () => {
 // Guardar
 el.form.addEventListener('submit', async (e) => {
   e.preventDefault();
+
   const fd = new FormData(el.form);
   const data = Object.fromEntries(fd.entries());
+
+  alert(`📤 Formulario enviado\n\namount: ${data.amount}\ndate: ${data.date}\ntype: ${data.type}\ncategory: ${data.category}`);
+
   const parsedAmount = parseAmountToCents(data.amount);
+  alert(`🔍 Valor parseado a céntimos: ${parsedAmount}`);
+
   if (!data.amount || isNaN(parsedAmount)) {
-    alert(`🧪 Importe introducido: "${data.amount}"\n🔍 Parseado: ${parsedAmount}`);
+    alert('❌ Importe inválido');
     return;
   }
   if (!data.date) {
-    alert('Fecha requerida');
+    alert('❌ Fecha requerida');
     return;
   }
+
+  if (!window.__actions || !window.__actions.saveTx) {
+    alert('⚠️ Firebase aún no está listo. Intenta de nuevo en unos segundos.');
+    return;
+  }
+
   const id = el.dlg.dataset.editing || null;
-  await window.__actions.saveTx({
-    type: data.type,
-    amountCents: parsedAmount,
-    category: data.category,
-    date: data.date,
-    note: data.note,
-    recurringFreq: document.getElementById('recurringFreq').value,
-    recurringEndsOn: document.getElementById('recurringEndsOn').value
-  }, id);
-  el.dlg.close();
+
+  try {
+    await window.__actions.saveTx({
+      type: data.type,
+      amountCents: parsedAmount,
+      category: data.category,
+      date: data.date,
+      note: data.note,
+      recurringFreq: document.getElementById('recurringFreq').value,
+      recurringEndsOn: document.getElementById('recurringEndsOn').value
+    }, id);
+
+    alert('✅ Movimiento guardado correctamente');
+    el.dlg.close();
+  } catch (err) {
+    alert('❌ Error al guardar el movimiento:\n' + err.message);
+  }
 });
 
 
