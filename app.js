@@ -306,3 +306,7 @@ el.fileImport.addEventListener('change', async (e) => {
     console.error(err); alert('Error importando JSON');
   }
 });
+
+document.getElementById('btnCancel').addEventListener('click', () => {
+  el.dlg.close();
+});
