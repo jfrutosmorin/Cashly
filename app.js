@@ -360,6 +360,43 @@ el.fileImport.addEventListener('change', async (e) => {
   }
 });
 
+document.getElementById('btnLogout').addEventListener('click', async () => {
+  const { signOut } = await import('https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js');
+  await signOut(window.__auth);
+  location.reload();
+});
+
 document.getElementById('btnCancel').addEventListener('click', () => {
   el.dlg.close();
+});
+
+const authForm = document.getElementById('authForm');
+const authDialog = document.getElementById('authDialog');
+const emailInput = document.getElementById('authEmail');
+const pwdInput = document.getElementById('authPassword');
+const btnRegister = document.getElementById('btnRegister');
+
+btnRegister.addEventListener('click', async () => {
+  try {
+    const email = emailInput.value;
+    const pwd = pwdInput.value;
+    const { createUserWithEmailAndPassword } = await import('https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js');
+    await createUserWithEmailAndPassword(window.__auth, email, pwd);
+    authDialog.close();
+  } catch (e) {
+    alert(`Error al registrar: ${e.message}`);
+  }
+});
+
+authForm.addEventListener('submit', async (e) => {
+  e.preventDefault();
+  try {
+    const email = emailInput.value;
+    const pwd = pwdInput.value;
+    const { signInWithEmailAndPassword } = await import('https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js');
+    await signInWithEmailAndPassword(window.__auth, email, pwd);
+    authDialog.close();
+  } catch (e) {
+    alert(`Error al iniciar sesión: ${e.message}`);
+  }
 });
