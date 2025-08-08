@@ -17,18 +17,25 @@
 </head>
 <dialog id="authDialog" class="sheet">
   <form method="dialog" id="authForm">
-    <h3>Iniciar sesión</h3>
+    <h3 id="authTitle">Iniciar sesión</h3>
+
     <label class="field">
       <span>Email</span>
-      <input type="email" id="authEmail" required>
+      <input type="email" id="authEmail" required autocomplete="email" inputmode="email" />
     </label>
+
     <label class="field">
       <span>Contraseña</span>
-      <input type="password" id="authPassword" required>
+      <input type="password" id="authPassword" required autocomplete="current-password" />
     </label>
+
+    <div class="sub" style="margin:6px 2px">
+      <button type="button" id="toggleMode" class="icon-btn">¿No tienes cuenta? Regístrate</button>
+    </div>
+
     <menu>
-      <button type="button" id="btnRegister">Registrarse</button>
-      <button type="submit" id="btnLogin">Entrar</button>
+      <button type="button" id="authCancel">Cancelar</button>
+      <button type="submit" id="authSubmit">Entrar</button>
     </menu>
   </form>
 </dialog>
