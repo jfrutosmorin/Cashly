@@ -185,19 +185,6 @@ function refreshList(){
   // Filtrar por mes visible
   const inMonth = txs.filter(t => t.__dateObj && t.__dateObj >= first && t.__dateObj <= last);
 
-  // ⚠️ Alerta de depuración (muestra hasta 6 ejemplos)
-  alert(
-    `DEBUG fechas\n` +
-    `state.month = ${state.month}\n` +
-    `docs totales = ${state.txs.length}\n` +
-    `fechas válidas = ${valid}\n` +
-    `fechas inválidas = ${invalid}\n` +
-    `en mes actual = ${inMonth.length}\n\n` +
-    details.slice(0,6).join('\n')
-  );
-
-  // ---- A partir de aquí, lo de siempre pero usando inMonth ----
-
   // Totales
   const income  = inMonth.filter(t=>t.type==='income' ).reduce((s,t)=>s+(t.amountCents||0),0);
   const expense = inMonth.filter(t=>t.type==='expense').reduce((s,t)=>s+(t.amountCents||0),0);
@@ -269,11 +256,8 @@ el.form.addEventListener('submit', async (e) => {
 
   const fd = new FormData(el.form);
   const data = Object.fromEntries(fd.entries());
-
-  alert(`📤 Formulario enviado\n\namount: ${data.amount}\ndate: ${data.date}\ntype: ${data.type}\ncategory: ${data.category}`);
-
+  
   const parsedAmount = parseAmountToCents(data.amount);
-  alert(`🔍 Valor parseado a céntimos: ${parsedAmount}`);
 
   if (!data.amount || isNaN(parsedAmount)) {
     alert('❌ Importe inválido');
