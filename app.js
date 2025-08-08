@@ -370,33 +370,73 @@ document.getElementById('btnCancel').addEventListener('click', () => {
   el.dlg.close();
 });
 
-const authForm = document.getElementById('authForm');
-const authDialog = document.getElementById('authDialog');
-const emailInput = document.getElementById('authEmail');
-const pwdInput = document.getElementById('authPassword');
-const btnRegister = document.getElementById('btnRegister');
+// --- Auth UI (login/registro) ---
+const authDialog   = document.getElementById('authDialog');
+const authForm     = document.getElementById('authForm');
+const authEmail    = document.getElementById('authEmail');
+const authPassword = document.getElementById('authPassword');
+const toggleMode   = document.getElementById('toggleMode');
+const authCancel   = document.getElementById('authCancel');
+const authSubmit   = document.getElementById('authSubmit');
+const btnLogout    = document.getElementById('btnLogout');
 
-btnRegister.addEventListener('click', async () => {
+let authMode = 'login'; // 'login' | 'register'
+function setAuthMode(mode){
+  authMode = mode;
+  const title = document.getElementById('authTitle');
+  if (mode === 'login') {
+    title.textContent = 'Iniciar sesión';
+    authSubmit.textContent = 'Entrar';
+    toggleMode.textContent = '¿No tienes cuenta? Regístrate';
+  } else {
+    title.textContent = 'Crear cuenta';
+    authSubmit.textContent = 'Registrarme';
+    toggleMode.textContent = '¿Ya tienes cuenta? Inicia sesión';
+  }
+}
+setAuthMode('login');
+
+toggleMode?.addEventListener('click', () => {
+  setAuthMode(authMode === 'login' ? 'register' : 'login');
+});
+
+authCancel?.addEventListener('click', () => {
+  authDialog?.close();
+});
+
+authForm?.addEventListener('submit', async (e) => {
+  e.preventDefault();
   try {
-    const email = emailInput.value;
-    const pwd = pwdInput.value;
-    const { createUserWithEmailAndPassword } = await import('https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js');
-    await createUserWithEmailAndPassword(window.__auth, email, pwd);
-    authDialog.close();
+    const email = authEmail.value.trim();
+    const pwd   = authPassword.value;
+    if (!email || !pwd) { alert('Rellena email y contraseña'); return; }
+
+    if (!window.__firebase) { alert('Firebase no está listo aún.'); return; }
+    const { auth, createUserWithEmailAndPassword, signInWithEmailAndPassword } = window.__firebase;
+
+    if (authMode === 'register') {
+      await createUserWithEmailAndPassword(auth, email, pwd);
+    } else {
+      await signInWithEmailAndPassword(auth, email, pwd);
+    }
+
+    authDialog?.close();
+    // El onAuthStateChanged del firebase.js disparará 'firebase-ready' y montará listeners
   } catch (e) {
-    alert(`Error al registrar: ${e.message}`);
+    alert('Error de autenticación: ' + (e?.message || e));
   }
 });
 
-authForm.addEventListener('submit', async (e) => {
-  e.preventDefault();
+btnLogout?.addEventListener('click', async () => {
   try {
-    const email = emailInput.value;
-    const pwd = pwdInput.value;
-    const { signInWithEmailAndPassword } = await import('https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js');
-    await signInWithEmailAndPassword(window.__auth, email, pwd);
-    authDialog.close();
+    if (!window.__firebase) return;
+    const { auth, signOut } = window.__firebase;
+    await signOut(auth);
+    // Limpia UI mínima
+    state.txs = [];
+    refreshList();
+    // El onAuthStateChanged abrirá el diálogo otra vez
   } catch (e) {
-    alert(`Error al iniciar sesión: ${e.message}`);
+    alert('Error al cerrar sesión: ' + (e?.message || e));
   }
 });
