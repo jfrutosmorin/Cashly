@@ -41,8 +41,11 @@
 </dialog>
 <body>
 <header class="app-bar">
-  <div class="title">Mis Finanzas</div>
+  <div class="title">Cashly</div>
   <div class="spacer"></div>
+  <button id="btnOcr" class="icon-btn" title="Importar desde imagen">🖼️</button>
+  <input type="file" id="ocrFiles" accept="image/*" multiple hidden>
+  <div class="spacer"></div>  
   <button id="btnExport" class="icon-btn" title="Exportar JSON">⤴︎</button>
   <label class="file-label" title="Importar JSON">
     ⤵︎ <input type="file" id="fileImport" accept="application/json" hidden>
