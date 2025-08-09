@@ -325,12 +325,29 @@ function openEdit(id){
 
 function confirmDelete(id){
   el.confirmText.textContent = '¿Eliminar este movimiento?';
+  // Quitamos posibles listeners previos
+  el.confirm.addEventListener('close', () => {}, { once:true }); 
+  // Abrimos y esperamos el cierre
   el.confirm.showModal();
   el.confirm.addEventListener('close', async () => {
-    if (el.confirm.returnValue === 'ok') {
-      await window.__actions.removeTx(id);
+    try {
+      if (el.confirm.returnValue === 'ok') {
+        await window.__actions.removeTx(id);
+      }
+    } catch (e) {
+      alert('Error eliminando: ' + (e?.message || e));
     }
   }, { once:true });
+}
+
+async function removeTx(id){
+  try {
+    const { db, user } = window.__firebase;
+    const { doc, deleteDoc } = await import('https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js');
+    await deleteDoc(doc(db, 'users', user.uid, 'transactions', id));
+  } catch (e) {
+    throw e; // lo captura confirmDelete y muestra alert
+  }
 }
 
 // Exportar / Importar
