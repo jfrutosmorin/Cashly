@@ -614,25 +614,24 @@ function findAmountToken(line){
     .replace(/[–−—]/g, '-') // unifica guiones raros
     .replace(/\s+/g, ' ');  // colapsa espacios
 
-  // helper: ¿hay un "-" inmediatamente antes del número detectado (permitiendo 1 espacio)?
   const hasMinusBefore = (str, match) => {
-    const start = match.index;                          // dónde empieza el número
-    const look = str.slice(Math.max(0, start-2), start+1);
-    return /-\s*$/.test(look);                          // "-" (opcional espacio) pegado al inicio
+    const start = match.index;
+    const look = str.slice(Math.max(0, start - 2), start + 1);
+    return /-\s*$/.test(look);
   };
 
-  // 1) "34 00€" / "- 34 00€" / "33,75€"
-  let r = /(\d{1,3}(?:[.\s ]\d{3})*)([,\s]\d{2})\s*€?/;
+  // 1) "34 00€"
+  let r = /(\d{1,3}(?:[.\s ]\d{3})*)([,\s]\d{2})\s*€?/;
   let m = r.exec(s);
   if (m){
-    const euros = m[1].replace(/[.\s ]/g,'');
+    const euros = m[1].replace(/[.\s ]/g,'');
     const cents = m[2].replace(/[,\s]/g,'');
     const negative = hasMinusBefore(s, m);
     const sign = negative ? '-' : '';
     return { cents: Math.round(parseFloat(`${sign}${euros}.${cents}`)*100), negative };
   }
 
-  // 2) "14,75€" / "-14,75€" / "14.75€"
+  // 2) "14,75€"
   r = /(\d+)[.,](\d{2})\s*€?/;
   m = r.exec(s);
   if (m){
@@ -641,7 +640,7 @@ function findAmountToken(line){
     return { cents: Math.round(parseFloat(`${sign}${m[1]}.${m[2]}`)*100), negative };
   }
 
-  // 3) "1475€" -> 14,75€
+  // 3) "1475€"
   r = /(\d{3,})\s*€/;
   m = r.exec(s);
   if (m){
@@ -655,6 +654,7 @@ function findAmountToken(line){
 
   return null;
 }
+
 // === Parser principal: SOLO por el signo detectado por findAmountToken ===
 function parseBankTextToTx(text){
   if (!text) return [];
