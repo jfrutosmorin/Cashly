@@ -608,45 +608,57 @@ function renderCandidatesForImport(candidates){
 
 // === OCR: extracción de importes robusta (espacios, coma, punto, "1475€" => 14,75) ===
 // --- Detectar el primer importe de una línea y su signo ---
+// --- Detecta importe y NEGATIVIDAD únicamente si hay un "-" justo antes del número ---
 function findAmountToken(line){
-  // Normalizar guiones y comas/puntos
+  // Normaliza y colapsa espacios. Unifica todos los “guiones raros” al guion normal.
   let s = line
     .normalize('NFKC')
-    .replace(/[–−—]/g, '-') // todos los guiones raros -> guion normal
-    .replace(/\s+/g, ' ');  // colapsar espacios
+    .replace(/[–−—]/g, '-')     // EN DASH / MINUS SIGN / EM DASH -> "-"
+    .replace(/\s+/g, ' ');
 
-  // Formatos tipo "- 34 00€", "34 00€", "-34,00€", "-14.75€"
-  let r = /(-)?\s*(\d{1,3}(?:[.\s ]\d{3})*)([,\s]\d{2})\s*€?/;
+  // helper para decidir si hay "-" inmediatamente antes del primer dígito detectado
+  const hasMinusBefore = (str, match) => {
+    const start = match.index;                    // posición donde empieza el token
+    const look = str.slice(Math.max(0, start-2), start+1); // 0‑2 chars antes
+    return /-\s*$/.test(look);                    // "-" (posible espacio) justo antes
+  };
+
+  // 1) "34 00€", "- 34 00€", "-34,00€", "-14.75€"
+  let r = /(\d{1,3}(?:[.\s ]\d{3})*)([,\s]\d{2})\s*€?/;
   let m = r.exec(s);
   if (m){
-    const euros = m[2].replace(/[.\s ]/g,'');
-    const cents = m[3].replace(/[,\s]/g,'');
-    const sign = m[1] ? '-' : '';
-    return { cents: Math.round(parseFloat(`${sign}${euros}.${cents}`)*100), negative: sign === '-' };
+    const euros = m[1].replace(/[.\s ]/g,'');
+    const cents = m[2].replace(/[,\s]/g,'');
+    const negative = hasMinusBefore(s, m);
+    const sign = negative ? '-' : '';
+    return { cents: Math.round(parseFloat(`${sign}${euros}.${cents}`)*100), negative };
   }
 
-  // Formatos tipo "-14,75€" o "14.75€"
-  r = /(-)?\s*(\d+)[.,](\d{2})\s*€?/;
+  // 2) "14,75€" / "-14,75€" / "14.75€"
+  r = /(\d+)[.,](\d{2})\s*€?/;
   m = r.exec(s);
   if (m){
-    const sign = m[1] ? '-' : '';
-    return { cents: Math.round(parseFloat(`${sign}${m[2]}.${m[3]}`)*100), negative: sign === '-' };
+    const negative = hasMinusBefore(s, m);
+    const sign = negative ? '-' : '';
+    return { cents: Math.round(parseFloat(`${sign}${m[1]}.${m[2]}`)*100), negative };
   }
 
-  // Formatos tipo "1475€" (14,75€)
-  r = /(-)?\s*(\d{3,})\s*€/;
+  // 3) "1475€" -> 14,75€  (con signo opcional justo antes)
+  r = /(\d{3,})\s*€/;
   m = r.exec(s);
   if (m){
-    const sign = m[1] ? '-' : '';
-    const digits = m[2];
+    const negative = hasMinusBefore(s, m);
+    const sign = negative ? '-' : '';
+    const digits = m[1];
     const euros = digits.slice(0, -2) || '0';
     const cents = digits.slice(-2);
-    return { cents: Math.round(parseFloat(`${sign}${euros}.${cents}`)*100), negative: sign === '-' };
+    return { cents: Math.round(parseFloat(`${sign}${euros}.${cents}`)*100), negative };
   }
 
   return null;
 }
-// === Parser principal: SOLO por signo ===
+
+// === Parser principal: SOLO por el signo detectado por findAmountToken ===
 function parseBankTextToTx(text){
   if (!text) return [];
   const lines = text.split(/\r?\n/).map(s => s.trim()).filter(Boolean);
@@ -677,16 +689,14 @@ function parseBankTextToTx(text){
 
     const tok = findAmountToken(ln);
     if (!tok || !Number.isFinite(tok.cents) || Math.abs(tok.cents) === 0){
-      if (/[A-Za-zÁÉÍÓÚáéíóúñÑ]/.test(ln)) lastDesc = ln; // posible descripción para la siguiente línea
+      if (/[A-Za-zÁÉÍÓÚáéíóúñÑ]/.test(ln)) lastDesc = ln;
       continue;
     }
 
-    // Tipo SOLO por el signo del importe
-    const type = tok.negative ? 'expense' : 'income';
-    const amountCents = Math.abs(tok.cents); // guardamos siempre positivo
+    const type = tok.negative ? 'expense' : 'income';  // ← SOLO por signo
+    const amountCents = Math.abs(tok.cents);
 
-    // Nota: texto antes del importe; si queda vacío, usa la descripción previa
-    let note = ln.replace(/\s*[€]?\s*[\d\s.,−-]{3,}\s*€?\s*$/, '').trim();
+    let note = ln.replace(/\s*[€]?\s*[\d\s.,−–—-]{3,}\s*€?\s*$/, '').trim();
     if (note.length < 4 && lastDesc) note = lastDesc;
 
     out.push({
@@ -700,7 +710,6 @@ function parseBankTextToTx(text){
 
   return out;
 }
-
 // Fallback: si no hay fechas, usa HOY. También SOLO por signo.
 function parseAnyAmountsToday(text){
   const out=[]; 
