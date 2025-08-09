@@ -643,78 +643,64 @@ function parseBankTextToTx(text){
   if (!text) return [];
   const lines = text.split(/\r?\n/).map(s => s.trim()).filter(Boolean);
 
-  // Meses abreviados ES
   const MES = { ene:1,feb:2,mar:3,abr:4,may:5,jun:6,jul:7,ago:8,sep:9,oct:10,nov:11,dic:12 };
-  // "Jueves, 7 ago" (con o sin tilde)
   const reFecha = /(?:lunes|martes|mi[eé]rcoles|miercoles|jueves|viernes|s[áa]bado|sabado|domingo),?\s*(\d{1,2})\s+([a-záéíóú]{3,})/i;
-  // Alguna líneas traen el año suelto (ej: "2025" a la derecha)
   const reSoloAnio = /\b(20\d{2})\b/;
-
-  // Palabras clave para tipo
-  const KEY_EXP = /(compra|pago|tarj|cargo|comisi[oó]n|suscripci[oó]n|gasolin|telef[oó]nica|corte\s+ingles|apple|amazon|movil|m[oó]vil|bizum enviado)/i;
-  const KEY_INC = /(ingreso|abono|transferencia.*(recib|entrada)|n[oó]mina|bizum recibido|devoluci[oó]n)/i;
-
-  // Heurística de categoría
-  const pickCategory = (desc, isExpense) => {
-    if (/bosonit/i.test(desc)) return isExpense ? 'other_exp' : 'freelance';
-    if (/n[oó]mina|salario/i.test(desc)) return isExpense ? 'other_exp' : 'salary';
-    if (/corte\s+ingles|apple|amazon|tienda|compra/i.test(desc)) return isExpense ? 'other_exp' : 'other_inc';
-    if (/bizum/i.test(desc)) return isExpense ? 'other_exp' : 'other_inc';
-    if (/gasolin|repsol|cepsa/i.test(desc)) return 'transport';
-    return isExpense ? 'other_exp' : 'other_inc';
-  };
 
   let currentYear = new Date().getFullYear();
   let currentDateISO = null;
+  let lastDesc = '';
   const out = [];
 
-  for (const lnRaw of lines){
-    const ln = lnRaw.normalize('NFKC');
+  for (const raw of lines){
+    const ln = raw.normalize('NFKC');
 
-    // Actualiza año si aparece "2025" suelto
     const my = ln.match(reSoloAnio);
     if (my) currentYear = parseInt(my[1],10);
 
-    // Cabecera de fecha "Jueves, 7 ago"
     const mf = ln.toLowerCase().match(reFecha);
     if (mf){
       const d  = parseInt(mf[1],10);
       const mm = MES[mf[2].slice(0,3).toLowerCase()] || (new Date().getMonth()+1);
       currentDateISO = `${currentYear}-${String(mm).padStart(2,'0')}-${String(d).padStart(2,'0')}`;
+      lastDesc = '';
       continue;
     }
 
-    // Línea con importe
     const cents = extractAmountCents(ln);
-    if (!Number.isFinite(cents) || cents <= 0) continue;
+    if (!Number.isFinite(cents) || cents <= 0){
+      if (/[A-Za-zÁÉÍÓÚáéíóúñÑ]/.test(ln)) lastDesc = ln;
+      continue;
+    }
 
-    // Tipo: signo o palabras clave
-    const hasMinus = /(^|[^0-9])[-−]\s?\d/.test(ln);
-    let type = hasMinus ? 'expense' : 'income';
-    if (KEY_EXP.test(ln)) type = 'expense';
-    if (KEY_INC.test(ln)) type = 'income';
+    // SOLO por signo del importe (en la línea del importe)
+    const isNegative = /(^|[^0-9])[-−]\s?\d/.test(ln);
+    const type = isNegative ? 'expense' : 'income';
 
-    // Nota (texto antes del importe)
-    const note = ln.replace(/\s*[€]?\s*[\d\s.,−-]{3,}\s*€?\s*$/, '').trim();
+    // Nota: lo que queda antes del importe; si queda vacío, usa la línea previa
+    let note = ln.replace(/\s*[€]?\s*[\d\s.,−-]{3,}\s*€?\s*$/, '').trim();
+    if (note.length < 4 && lastDesc) note = lastDesc;
+
+    // Categoría neutra (puedes mantener tus reglas si quieres)
+    const categoryId = type === 'expense' ? 'other_exp' : 'other_inc';
 
     out.push({
       type,
       amountCents: cents,
       date: currentDateISO || todayISO(),
       merchant: note || 'Movimiento',
-      categoryId: pickCategory(note, type==='expense')
+      categoryId
     });
   }
 
-  // Si no hubo fecha en todo el bloque, usa HOY (ya lo hacemos arriba)
   return out;
 }
 
-// === Fallback si no encuentra nada (usa HOY) ===
 function parseAnyAmountsToday(text){
   const out=[]; 
   const lines = text.split(/\r?\n/).map(s=>s.trim()).filter(Boolean);
-  for (const ln of lines){
+  for (const lnRaw of lines){
+    const ln = lnRaw.normalize('NFKC');
     const cents = extractAmountCents(ln);
     if (Number.isFinite(cents) && cents>0){
       const isNegative = /(^|[^0-9])[-−]\s?\d/.test(ln);
