@@ -606,94 +606,111 @@ function renderCandidatesForImport(candidates){
   };
 }
 
+// === OCR: extracción de importes robusta (espacios, coma, punto, "1475€" => 14,75) ===
 function extractAmountCents(ln){
   const s = ln.normalize('NFKC');
 
-  // 1) Formato con separador (espacio o coma "34 00" / "33,75")
+  // "34 00€" / "33,75€"
   let m = s.match(/([+\-−]?)\s*(\d{1,3}(?:[.\s ]\d{3})*)([,\s]\d{2})\s*€?/);
   if (m) {
-    const sign = m[1] === '−' ? '-' : (m[1] || '');
+    const sign  = m[1] === '−' ? '-' : (m[1] || '');
     const euros = m[2].replace(/[.\s ]/g,'');
     const cents = m[3].replace(/[,\s]/g,'');
-    return Math.round(parseFloat(`${sign}${euros}.${cents}`) * 100);
+    return Math.round(parseFloat(`${sign}${euros}.${cents}`)*100);
   }
 
-  // 2) Formato clásico "14,75" o "14.75"
+  // "14,75" o "14.75"
   m = s.match(/([+\-−]?)\s*(\d+)[.,](\d{2})\s*€?/);
   if (m) {
     const sign = m[1] === '−' ? '-' : (m[1] || '');
-    return Math.round(parseFloat(`${sign}${m[2]}.${m[3]}`) * 100);
+    return Math.round(parseFloat(`${sign}${m[2]}.${m[3]}`)*100);
   }
 
-  // 3) Todo junto antes de €: "1475€" => 14,75€
+  // "1475€" => 14,75€
   m = s.match(/([+\-−]?)\s*(\d{3,})\s*€/);
   if (m) {
-    const sign = m[1] === '−' ? '-' : (m[1] || '');
+    const sign   = m[1] === '−' ? '-' : (m[1] || '');
     const digits = m[2];
-    const euros = digits.slice(0, -2) || '0';
-    const cents = digits.slice(-2);
-    return Math.round(parseFloat(`${sign}${euros}.${cents}`) * 100);
+    const euros  = digits.slice(0,-2) || '0';
+    const cents  = digits.slice(-2);
+    return Math.round(parseFloat(`${sign}${euros}.${cents}`)*100);
   }
-
   return NaN;
 }
 
-// ======== Parser para texto OCR (español, estilo apps bancarias) ========
-// Heurísticas básicas para: fechas, importes y tipo (ingreso/gasto).
+// === Parser principal: soporta múltiples días y clasifica ingresos/gastos ===
 function parseBankTextToTx(text){
   if (!text) return [];
   const lines = text.split(/\r?\n/).map(s => s.trim()).filter(Boolean);
 
+  // Meses abreviados ES
   const MES = { ene:1,feb:2,mar:3,abr:4,may:5,jun:6,jul:7,ago:8,sep:9,oct:10,nov:11,dic:12 };
-  const reFecha = /(?:lunes|martes|miércoles|miercoles|jueves|viernes|sábado|sabado|domingo),?\s*(\d{1,2})\s+([a-záéíóú]{3,})/i;
+  // "Jueves, 7 ago" (con o sin tilde)
+  const reFecha = /(?:lunes|martes|mi[eé]rcoles|miercoles|jueves|viernes|s[áa]bado|sabado|domingo),?\s*(\d{1,2})\s+([a-záéíóú]{3,})/i;
+  // Alguna líneas traen el año suelto (ej: "2025" a la derecha)
+  const reSoloAnio = /\b(20\d{2})\b/;
 
-  let currentDateISO = todayISO();
+  // Palabras clave para tipo
+  const KEY_EXP = /(compra|pago|tarj|cargo|comisi[oó]n|suscripci[oó]n|gasolin|telef[oó]nica|corte\s+ingles|apple|amazon|movil|m[oó]vil|bizum enviado)/i;
+  const KEY_INC = /(ingreso|abono|transferencia.*(recib|entrada)|n[oó]mina|bizum recibido|devoluci[oó]n)/i;
+
+  // Heurística de categoría
+  const pickCategory = (desc, isExpense) => {
+    if (/bosonit/i.test(desc)) return isExpense ? 'other_exp' : 'freelance';
+    if (/n[oó]mina|salario/i.test(desc)) return isExpense ? 'other_exp' : 'salary';
+    if (/corte\s+ingles|apple|amazon|tienda|compra/i.test(desc)) return isExpense ? 'other_exp' : 'other_inc';
+    if (/bizum/i.test(desc)) return isExpense ? 'other_exp' : 'other_inc';
+    if (/gasolin|repsol|cepsa/i.test(desc)) return 'transport';
+    return isExpense ? 'other_exp' : 'other_inc';
+  };
+
+  let currentYear = new Date().getFullYear();
+  let currentDateISO = null;
   const out = [];
 
   for (const lnRaw of lines){
     const ln = lnRaw.normalize('NFKC');
 
-    // Fecha cabecera ("Miércoles, 6 ago")
+    // Actualiza año si aparece "2025" suelto
+    const my = ln.match(reSoloAnio);
+    if (my) currentYear = parseInt(my[1],10);
+
+    // Cabecera de fecha "Jueves, 7 ago"
     const mf = ln.toLowerCase().match(reFecha);
     if (mf){
-      const d = parseInt(mf[1],10);
+      const d  = parseInt(mf[1],10);
       const mm = MES[mf[2].slice(0,3).toLowerCase()] || (new Date().getMonth()+1);
-      const yy = new Date().getFullYear();
-      currentDateISO = `${yy}-${String(mm).padStart(2,'0')}-${String(d).padStart(2,'0')}`;
+      currentDateISO = `${currentYear}-${String(mm).padStart(2,'0')}-${String(d).padStart(2,'0')}`;
       continue;
     }
 
-    // Importe
+    // Línea con importe
     const cents = extractAmountCents(ln);
     if (!Number.isFinite(cents) || cents <= 0) continue;
 
-    // Tipo por signo → si no hay signo, lo consideramos ingreso (tus capturas son abonos)
-    const isNegative = /(^|[^0-9])[-−]\s?\d/.test(ln); // detecta signo - o − delante de número
-    const type = isNegative ? 'expense' : 'income';
+    // Tipo: signo o palabras clave
+    const hasMinus = /(^|[^0-9])[-−]\s?\d/.test(ln);
+    let type = hasMinus ? 'expense' : 'income';
+    if (KEY_EXP.test(ln)) type = 'expense';
+    if (KEY_INC.test(ln)) type = 'income';
 
-    // Nota
+    // Nota (texto antes del importe)
     const note = ln.replace(/\s*[€]?\s*[\d\s.,−-]{3,}\s*€?\s*$/, '').trim();
-
-    // Categoría estimada
-    const pickCategory = (desc, isExpense) => {
-      if (/bosonit/i.test(desc)) return isExpense ? 'other_exp' : 'freelance';
-      if (/transfe|ingreso|abono|n[oó]mina/i.test(desc)) return isExpense ? 'other_exp' : 'salary';
-      return isExpense ? 'other_exp' : 'other_inc';
-    };
 
     out.push({
       type,
       amountCents: cents,
-      date: currentDateISO,
+      date: currentDateISO || todayISO(),
       merchant: note || 'Movimiento',
       categoryId: pickCategory(note, type==='expense')
     });
   }
 
+  // Si no hubo fecha en todo el bloque, usa HOY (ya lo hacemos arriba)
   return out;
 }
 
-// Fallback: si no detecta fechas, al menos captura importes y usa fecha de hoy
+// === Fallback si no encuentra nada (usa HOY) ===
 function parseAnyAmountsToday(text){
   const out=[]; 
   const lines = text.split(/\r?\n/).map(s=>s.trim()).filter(Boolean);
