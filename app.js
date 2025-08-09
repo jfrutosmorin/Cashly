@@ -611,45 +611,46 @@ function renderCandidatesForImport(candidates){
 function findAmountToken(line){
   let s = line
     .normalize('NFKC')
-    .replace(/[–−—]/g, '-') // unifica guiones raros
-    .replace(/\s+/g, ' ');  // colapsa espacios
+    .replace(/[‐-–—−]/g, '-') // convierte todos los tipos de guiones a "-"
+    .replace(/\s+/g, ' '); // colapsa espacios
 
-  const hasMinusBefore = (str, match) => {
-    const start = match.index;
-    const look = str.slice(Math.max(0, start - 2), start + 1);
-    return /-\s*$/.test(look);
+  const negativeNear = (match) => {
+    const idx = match.index;
+    // mira hasta 3 caracteres antes del número por si hay guion
+    const context = s.slice(Math.max(0, idx - 3), idx);
+    return context.includes('-');
   };
 
-  // 1) "34 00€"
-  let r = /(\d{1,3}(?:[.\s ]\d{3})*)([,\s]\d{2})\s*€?/;
+  // Formato "34 00€"
+  let r = /(\d{1,3}(?:[.\s]\d{3})*)([,\s]\d{2})\s*€?/;
   let m = r.exec(s);
   if (m){
-    const euros = m[1].replace(/[.\s ]/g,'');
-    const cents = m[2].replace(/[,\s]/g,'');
-    const negative = hasMinusBefore(s, m);
+    const euros = m[1].replace(/[.\s]/g, '');
+    const cents = m[2].replace(/[,\s]/g, '');
+    const negative = negativeNear(m);
     const sign = negative ? '-' : '';
-    return { cents: Math.round(parseFloat(`${sign}${euros}.${cents}`)*100), negative };
+    return { cents: Math.round(parseFloat(`${sign}${euros}.${cents}`) * 100), negative };
   }
 
-  // 2) "14,75€"
+  // Formato "14,75€"
   r = /(\d+)[.,](\d{2})\s*€?/;
   m = r.exec(s);
   if (m){
-    const negative = hasMinusBefore(s, m);
+    const negative = negativeNear(m);
     const sign = negative ? '-' : '';
-    return { cents: Math.round(parseFloat(`${sign}${m[1]}.${m[2]}`)*100), negative };
+    return { cents: Math.round(parseFloat(`${sign}${m[1]}.${m[2]}`) * 100), negative };
   }
 
-  // 3) "1475€"
-  r = /(\d{3,})\s*€/;
+  // Formato "1475€"
+  r = /(\d{3,})\s*€?/;
   m = r.exec(s);
   if (m){
-    const negative = hasMinusBefore(s, m);
+    const negative = negativeNear(m);
     const sign = negative ? '-' : '';
     const digits = m[1];
     const euros = digits.slice(0, -2) || '0';
     const cents = digits.slice(-2);
-    return { cents: Math.round(parseFloat(`${sign}${euros}.${cents}`)*100), negative };
+    return { cents: Math.round(parseFloat(`${sign}${euros}.${cents}`) * 100), negative };
   }
 
   return null;
@@ -707,6 +708,7 @@ function parseBankTextToTx(text){
 
   return out;
 }
+
 // Fallback: si no hay fechas, usa HOY. También SOLO por signo.
 function parseAnyAmountsToday(text){
   const out=[]; 
