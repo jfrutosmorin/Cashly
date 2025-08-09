@@ -607,23 +607,21 @@ function renderCandidatesForImport(candidates){
 }
 
 // === OCR: extracción de importes robusta (espacios, coma, punto, "1475€" => 14,75) ===
-// --- Detectar el primer importe de una línea y su signo ---
-// --- Detecta importe y NEGATIVIDAD únicamente si hay un "-" justo antes del número ---
+// Detecta el primer importe y si es negativo SOLO si hay "-" justo antes del número.
 function findAmountToken(line){
-  // Normaliza y colapsa espacios. Unifica todos los “guiones raros” al guion normal.
   let s = line
     .normalize('NFKC')
-    .replace(/[–−—]/g, '-')     // EN DASH / MINUS SIGN / EM DASH -> "-"
-    .replace(/\s+/g, ' ');
+    .replace(/[–−—]/g, '-') // unifica guiones raros
+    .replace(/\s+/g, ' ');  // colapsa espacios
 
-  // helper para decidir si hay "-" inmediatamente antes del primer dígito detectado
+  // helper: ¿hay un "-" inmediatamente antes del número detectado (permitiendo 1 espacio)?
   const hasMinusBefore = (str, match) => {
-    const start = match.index;                    // posición donde empieza el token
-    const look = str.slice(Math.max(0, start-2), start+1); // 0‑2 chars antes
-    return /-\s*$/.test(look);                    // "-" (posible espacio) justo antes
+    const start = match.index;                          // dónde empieza el número
+    const look = str.slice(Math.max(0, start-2), start+1);
+    return /-\s*$/.test(look);                          // "-" (opcional espacio) pegado al inicio
   };
 
-  // 1) "34 00€", "- 34 00€", "-34,00€", "-14.75€"
+  // 1) "34 00€" / "- 34 00€" / "33,75€"
   let r = /(\d{1,3}(?:[.\s ]\d{3})*)([,\s]\d{2})\s*€?/;
   let m = r.exec(s);
   if (m){
@@ -643,7 +641,7 @@ function findAmountToken(line){
     return { cents: Math.round(parseFloat(`${sign}${m[1]}.${m[2]}`)*100), negative };
   }
 
-  // 3) "1475€" -> 14,75€  (con signo opcional justo antes)
+  // 3) "1475€" -> 14,75€
   r = /(\d{3,})\s*€/;
   m = r.exec(s);
   if (m){
@@ -657,7 +655,6 @@ function findAmountToken(line){
 
   return null;
 }
-
 // === Parser principal: SOLO por el signo detectado por findAmountToken ===
 function parseBankTextToTx(text){
   if (!text) return [];
