@@ -605,65 +605,88 @@ function renderCandidatesForImport(candidates){
     setTimeout(()=> dlgOcr.close(), 600);
   };
 }
+
+function extractAmountCents(ln){
+  const s = ln.normalize('NFKC');
+
+  // 1) Formato con separador (espacio o coma "34 00" / "33,75")
+  let m = s.match(/([+\-−]?)\s*(\d{1,3}(?:[.\s ]\d{3})*)([,\s]\d{2})\s*€?/);
+  if (m) {
+    const sign = m[1] === '−' ? '-' : (m[1] || '');
+    const euros = m[2].replace(/[.\s ]/g,'');
+    const cents = m[3].replace(/[,\s]/g,'');
+    return Math.round(parseFloat(`${sign}${euros}.${cents}`) * 100);
+  }
+
+  // 2) Formato clásico "14,75" o "14.75"
+  m = s.match(/([+\-−]?)\s*(\d+)[.,](\d{2})\s*€?/);
+  if (m) {
+    const sign = m[1] === '−' ? '-' : (m[1] || '');
+    return Math.round(parseFloat(`${sign}${m[2]}.${m[3]}`) * 100);
+  }
+
+  // 3) Todo junto antes de €: "1475€" => 14,75€
+  m = s.match(/([+\-−]?)\s*(\d{3,})\s*€/);
+  if (m) {
+    const sign = m[1] === '−' ? '-' : (m[1] || '');
+    const digits = m[2];
+    const euros = digits.slice(0, -2) || '0';
+    const cents = digits.slice(-2);
+    return Math.round(parseFloat(`${sign}${euros}.${cents}`) * 100);
+  }
+
+  return NaN;
+}
+
 // ======== Parser para texto OCR (español, estilo apps bancarias) ========
 // Heurísticas básicas para: fechas, importes y tipo (ingreso/gasto).
 function parseBankTextToTx(text){
   if (!text) return [];
   const lines = text.split(/\r?\n/).map(s => s.trim()).filter(Boolean);
 
-  // Meses ES (3 letras)
   const MES = { ene:1,feb:2,mar:3,abr:4,may:5,jun:6,jul:7,ago:8,sep:9,oct:10,nov:11,dic:12 };
-
-  // Fecha estilo "Jueves, 7 ago" / "Miércoles, 6 ago"
   const reFecha = /(?:lunes|martes|miércoles|miercoles|jueves|viernes|sábado|sabado|domingo),?\s*(\d{1,2})\s+([a-záéíóú]{3,})/i;
-
-  // Importes: permite signo menos unicode (−), € delante o detrás, miles por punto o espacio fino
-  const reMonto = /(?:€\s*)?([+\-−]?\s?\d{1,3}(?:[.\s ]\d{3})*(?:[.,]\d{2})|\d+(?:[.,]\d{2}))(?:\s*€)?/i;
-
-  const KEY_EXP = /(compra|pago|tarj|cargo|movil|móvil|apple|amazon|comisión|comision|tienda|bizum enviado)/i;
-  const KEY_INC = /(ingreso|abono|transferencia.*(recib|entrada)|n[oó]mina|bizum recibido)/i;
-
-  const pickCategory = (desc, isExpense) => {
-    if (/super|mercadona|carre?four|aldi|lidl/i.test(desc)) return 'groceries';
-    if (/corte ingles|apple|amazon|tienda|compra/i.test(desc)) return isExpense ? 'other_exp' : 'other_inc';
-    if (/transfe|ingreso|abono|n[oó]mina/i.test(desc)) return isExpense ? 'other_exp' : 'salary';
-    if (/pago movil|m[oó]vil|tarj/i.test(desc)) return 'other_exp';
-    return isExpense ? 'other_exp' : 'other_inc';
-  };
 
   let currentDateISO = todayISO();
   const out = [];
 
-  for (let i=0;i<lines.length;i++){
-    const ln = lines[i].normalize('NFKC');
+  for (const lnRaw of lines){
+    const ln = lnRaw.normalize('NFKC');
 
-    const mF = ln.toLowerCase().match(reFecha);
-    if (mF){
-      const d = parseInt(mF[1],10);
-      const mm = (MES[mF[2].slice(0,3).toLowerCase()] || (new Date().getMonth()+1));
+    // Fecha cabecera ("Miércoles, 6 ago")
+    const mf = ln.toLowerCase().match(reFecha);
+    if (mf){
+      const d = parseInt(mf[1],10);
+      const mm = MES[mf[2].slice(0,3).toLowerCase()] || (new Date().getMonth()+1);
       const yy = new Date().getFullYear();
       currentDateISO = `${yy}-${String(mm).padStart(2,'0')}-${String(d).padStart(2,'0')}`;
       continue;
     }
 
-    const mA = ln.match(reMonto);
-    if (!mA) continue;
+    // Importe
+    const cents = extractAmountCents(ln);
+    if (!Number.isFinite(cents) || cents <= 0) continue;
 
-    const raw = mA[1].replace(/\s/g,'').replace('−','-').replace(/\.(?=\d{3}\b)/g,'').replace(',', '.');
-    const cents = Math.round(parseFloat(raw)*100);
-    if (!Number.isFinite(cents) || cents<=0) continue;
+    // Tipo por signo → si no hay signo, lo consideramos ingreso (tus capturas son abonos)
+    const isNegative = /(^|[^0-9])[-−]\s?\d/.test(ln); // detecta signo - o − delante de número
+    const type = isNegative ? 'expense' : 'income';
 
-    const isExpense = /^-/.test(raw) || KEY_EXP.test(ln);
-    const type = isExpense ? 'expense' : (KEY_INC.test(ln) ? 'income' : 'expense');
+    // Nota
+    const note = ln.replace(/\s*[€]?\s*[\d\s.,−-]{3,}\s*€?\s*$/, '').trim();
 
-    const note = ln.replace(mA[0], '').trim().replace(/\s{2,}/g,' ');
+    // Categoría estimada
+    const pickCategory = (desc, isExpense) => {
+      if (/bosonit/i.test(desc)) return isExpense ? 'other_exp' : 'freelance';
+      if (/transfe|ingreso|abono|n[oó]mina/i.test(desc)) return isExpense ? 'other_exp' : 'salary';
+      return isExpense ? 'other_exp' : 'other_inc';
+    };
 
     out.push({
       type,
       amountCents: cents,
       date: currentDateISO,
       merchant: note || 'Movimiento',
-      categoryId: pickCategory(note, isExpense)
+      categoryId: pickCategory(note, type==='expense')
     });
   }
 
@@ -672,20 +695,20 @@ function parseBankTextToTx(text){
 
 // Fallback: si no detecta fechas, al menos captura importes y usa fecha de hoy
 function parseAnyAmountsToday(text){
-  const re = /(?:€\s*)?([+\-−]?\s?\d{1,3}(?:[.\s ]\d{3})*(?:[.,]\d{2})|\d+(?:[.,]\d{2}))(?:\s*€)?/g;
-  const out=[]; let m;
-  while ((m=re.exec(text))){
-    const raw = m[1].replace(/\s/g,'').replace('−','-').replace(/\.(?=\d{3}\b)/g,'').replace(',', '.');
-    const cents = Math.round(parseFloat(raw)*100);
-    if (!Number.isFinite(cents) || cents<=0) continue;
-    const isExpense = /^-/.test(raw);
-    out.push({
-      type: isExpense ? 'expense':'expense', // por defecto gasto si no sabemos
-      amountCents: cents,
-      date: todayISO(),
-      merchant: 'Detectado por OCR',
-      categoryId: 'other_exp'
-    });
+  const out=[]; 
+  const lines = text.split(/\r?\n/).map(s=>s.trim()).filter(Boolean);
+  for (const ln of lines){
+    const cents = extractAmountCents(ln);
+    if (Number.isFinite(cents) && cents>0){
+      const isNegative = /(^|[^0-9])[-−]\s?\d/.test(ln);
+      out.push({
+        type: isNegative ? 'expense' : 'income',
+        amountCents: cents,
+        date: todayISO(),
+        merchant: 'Detectado por OCR',
+        categoryId: isNegative ? 'other_exp' : 'other_inc'
+      });
+    }
   }
   return out;
 }
