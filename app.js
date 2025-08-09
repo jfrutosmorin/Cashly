@@ -609,31 +609,35 @@ function renderCandidatesForImport(candidates){
 // === OCR: extracción de importes robusta (espacios, coma, punto, "1475€" => 14,75) ===
 // --- Detectar el primer importe de una línea y su signo ---
 function findAmountToken(line){
-  const s = line.normalize('NFKC');
+  // Normalizar guiones y comas/puntos
+  let s = line
+    .normalize('NFKC')
+    .replace(/[–−—]/g, '-') // todos los guiones raros -> guion normal
+    .replace(/\s+/g, ' ');  // colapsar espacios
 
-  // 34 00€, 33,75€ (con o sin separador de miles/espacio fino)
-  let r = /([-−]?)\s*(\d{1,3}(?:[.\s ]\d{3})*)([,\s]\d{2})\s*€?/g;
+  // Formatos tipo "- 34 00€", "34 00€", "-34,00€", "-14.75€"
+  let r = /(-)?\s*(\d{1,3}(?:[.\s ]\d{3})*)([,\s]\d{2})\s*€?/;
   let m = r.exec(s);
   if (m){
-    const sign = m[1] === '−' ? '-' : (m[1] || '');
-    const euros = m[2].replace(/[.\s ]/g,'');
+    const euros = m[2].replace(/[.\s ]/g,'');
     const cents = m[3].replace(/[,\s]/g,'');
+    const sign = m[1] ? '-' : '';
     return { cents: Math.round(parseFloat(`${sign}${euros}.${cents}`)*100), negative: sign === '-' };
   }
 
-  // 14,75€ o 14.75€
-  r = /([-−]?)\s*(\d+)[.,](\d{2})\s*€?/g;
+  // Formatos tipo "-14,75€" o "14.75€"
+  r = /(-)?\s*(\d+)[.,](\d{2})\s*€?/;
   m = r.exec(s);
   if (m){
-    const sign = m[1] === '−' ? '-' : (m[1] || '');
+    const sign = m[1] ? '-' : '';
     return { cents: Math.round(parseFloat(`${sign}${m[2]}.${m[3]}`)*100), negative: sign === '-' };
   }
 
-  // 1475€ => 14,75€
-  r = /([-−]?)\s*(\d{3,})\s*€/g;
+  // Formatos tipo "1475€" (14,75€)
+  r = /(-)?\s*(\d{3,})\s*€/;
   m = r.exec(s);
   if (m){
-    const sign = m[1] === '−' ? '-' : (m[1] || '');
+    const sign = m[1] ? '-' : '';
     const digits = m[2];
     const euros = digits.slice(0, -2) || '0';
     const cents = digits.slice(-2);
@@ -642,7 +646,6 @@ function findAmountToken(line){
 
   return null;
 }
-
 // === Parser principal: SOLO por signo ===
 function parseBankTextToTx(text){
   if (!text) return [];
