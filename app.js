@@ -492,82 +492,73 @@ ocrFiles?.addEventListener('change', async (e) => {
 
   try {
     const results = [];
-    // OCR de cada imagen (español). langPath trae datos 'spa' gratis.
+
+    // Pre-proceso: reescala y pone en blanco/negro para mejorar OCR
+    const preprocess = (file) => new Promise(res => {
+      const img = new Image();
+      img.onload = () => {
+        const scale = Math.min(1.8, 1200 / Math.min(img.width, img.height));
+        const w = Math.round(img.width * scale);
+        const h = Math.round(img.height * scale);
+        const c = document.createElement('canvas');
+        c.width = w; c.height = h;
+        const ctx = c.getContext('2d');
+        ctx.drawImage(img, 0, 0, w, h);
+        // Gris y contraste leve
+        const imgData = ctx.getImageData(0,0,w,h);
+        const d = imgData.data;
+        for (let i=0;i<d.length;i+=4){
+          const g = 0.299*d[i]+0.587*d[i+1]+0.114*d[i+2];
+          const gc = Math.min(255, Math.max(0, (g-128)*1.15+128));
+          d[i]=d[i+1]=d[i+2]=gc;
+        }
+        ctx.putImageData(imgData,0,0);
+        c.toBlob(b => res(b), 'image/jpeg', 0.92);
+      };
+      img.src = URL.createObjectURL(file);
+    });
+
     for (const file of e.target.files) {
-      const { data } = await Tesseract.recognize(file, 'spa', {
-        logger: m => (ocrStatus.textContent = `${m.status} ${Math.round((m.progress||0)*100)}%`),
-        langPath: 'https://tessdata.projectnaptha.com/4.0.0' // contiene spa.traineddata
-      });
+      const pre = await preprocess(file);
+
+      const { data } = await Tesseract.recognize(
+        pre,
+        // español + inglés mejora marcas y abreviaturas
+        'spa+eng',
+        {
+          logger: m => (ocrStatus.textContent = `${m.status} ${Math.round((m.progress||0)*100)}%`),
+          langPath: 'https://tessdata.projectnaptha.com/4.0.0',
+          // ayuda a detectar dígitos/€ y signos
+          tessedit_char_whitelist: '0123456789€,-.abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ áéíóúÁÉÍÓÚñÑ:/',
+        }
+      );
+
       results.push({ file, text: data.text || '' });
     }
 
-    // Parsear todos los textos a "transacciones" candidatas
+    // DEBUG: muestra lo que realmente leyó el OCR (primeros 600 chars)
+    const sample = results.map((r,i)=>`[Imagen ${i+1}] ${r.text.slice(0,600)}`).join('\n---\n');
+    ocrPreview.innerHTML = `<pre style="white-space:pre-wrap;font-size:12px;opacity:.8">${sample || '(sin texto OCR)'}</pre>`;
+
+    // Parseo
     const candidates = [];
-    for (const r of results) {
-      const parsed = parseBankTextToTx(r.text);
-      candidates.push(...parsed);
+    for (const r of results) candidates.push(...parseBankTextToTx(r.text));
+
+    if (!candidates.length) {
+      // Fallback: si no encontró fechas, al menos saca importes con fecha HOY
+      const fallback = parseAnyAmountsToday(results.map(r=>r.text).join('\n'));
+      if (fallback.length) candidates.push(...fallback);
     }
 
     if (!candidates.length) {
-      ocrPreview.innerHTML = '<p>No se reconocieron movimientos. Asegúrate de que las capturas sean nítidas.</p>';
+      ocrStatus.textContent = 'No se reconocieron movimientos. Prueba a recortar la zona de “Movimientos” y reintenta.';
       btnOcrImport.disabled = true;
       return;
     }
 
-    // Render de pre‑visualización con checkboxes
-    ocrPreview.innerHTML = '';
-    const list = document.createElement('ul');
-    list.style.listStyle = 'none';
-    list.style.padding = '0';
-
-    candidates.forEach((tx, i) => {
-      const li = document.createElement('li');
-      li.style.margin = '6px 0';
-      li.style.padding = '8px';
-      li.style.border = '1px solid #334155';
-      li.style.borderRadius = '8px';
-      const sign = tx.type === 'expense' ? '-' : '+';
-      li.innerHTML = `
-        <label style="display:flex; gap:8px; align-items:center;">
-          <input type="checkbox" data-i="${i}" checked>
-          <div style="flex:1">
-            <div><strong>${tx.note || tx.merchant || 'Movimiento'}</strong></div>
-            <div style="opacity:.8">${tx.date} · ${tx.category || '—'}</div>
-          </div>
-          <div><strong>${sign}${centsToEUR(tx.amountCents).replace('€','').trim()} €</strong></div>
-        </label>
-      `;
-      list.appendChild(li);
-    });
-
-    ocrPreview.appendChild(list);
-    btnOcrImport.disabled = false;
-
-    btnOcrImport.onclick = async () => {
-      const checks = ocrPreview.querySelectorAll('input[type="checkbox"]');
-      const toImport = [];
-      checks.forEach(ch => {
-        if (ch.checked) toImport.push(candidates[Number(ch.dataset.i)]);
-      });
-      if (!toImport.length) { alert('No hay elementos seleccionados'); return; }
-
-      // Alta en Firestore, reutilizando saveTx
-      ocrStatus.textContent = `Importando ${toImport.length}…`;
-      btnOcrImport.disabled = true;
-
-      for (const tx of toImport) {
-        await window.__actions.saveTx({
-          type: tx.type,
-          amountCents: tx.amountCents,
-          category: tx.categoryId || tx.category || 'other_exp',
-          date: tx.date,
-          note: tx.note || tx.merchant || ''
-        }, null);
-      }
-      ocrStatus.textContent = 'Importación completada';
-      setTimeout(()=> dlgOcr.close(), 600);
-    };
-
+    // Render selección
+    renderCandidatesForImport(candidates);
+    ocrStatus.textContent = `Detectados ${candidates.length} movimientos`;
   } catch (e2) {
     alert('Error OCR: ' + (e2?.message || e2));
     dlgOcr.close();
@@ -576,76 +567,131 @@ ocrFiles?.addEventListener('change', async (e) => {
   }
 });
 
+// Render de candidatos (sin cambios esenciales)
+function renderCandidatesForImport(candidates){
+  ocrPreview.innerHTML = '';
+  const list = document.createElement('ul');
+  list.style.listStyle='none'; list.style.padding='0';
+  candidates.forEach((tx,i)=>{
+    const li = document.createElement('li');
+    li.style.margin='6px 0'; li.style.padding='8px';
+    li.style.border='1px solid #334155'; li.style.borderRadius='8px';
+    const sign = tx.type==='expense' ? '-' : '+';
+    li.innerHTML = `
+      <label style="display:flex;gap:8px;align-items:center;">
+        <input type="checkbox" data-i="${i}" checked>
+        <div style="flex:1">
+          <div><strong>${tx.note || tx.merchant || 'Movimiento'}</strong></div>
+          <div style="opacity:.8">${tx.date} · ${tx.category || '—'}</div>
+        </div>
+        <div><strong>${sign}${centsToEUR(tx.amountCents).replace('€','').trim()} €</strong></div>
+      </label>`;
+    list.appendChild(li);
+  });
+  ocrPreview.appendChild(list);
+  btnOcrImport.disabled = false;
+
+  btnOcrImport.onclick = async () => {
+    const checks = ocrPreview.querySelectorAll('input[type="checkbox"]');
+    const toImport = [];
+    checks.forEach(ch => ch.checked && toImport.push(candidates[Number(ch.dataset.i)]));
+    if (!toImport.length) { alert('No hay elementos seleccionados'); return; }
+    ocrStatus.textContent = `Importando ${toImport.length}…`;
+    btnOcrImport.disabled = true;
+    for (const tx of toImport) {
+      await window.__actions.saveTx({
+        type: tx.type,
+        amountCents: tx.amountCents,
+        category: tx.categoryId || tx.category || 'other_exp',
+        date: tx.date,
+        note: tx.note || tx.merchant || ''
+      }, null);
+    }
+    ocrStatus.textContent = 'Importación completada';
+    setTimeout(()=> dlgOcr.close(), 600);
+  };
+}
 // ======== Parser para texto OCR (español, estilo apps bancarias) ========
 // Heurísticas básicas para: fechas, importes y tipo (ingreso/gasto).
-function parseBankTextToTx(text) {
+function parseBankTextToTx(text){
   if (!text) return [];
   const lines = text.split(/\r?\n/).map(s => s.trim()).filter(Boolean);
 
-  // Mapeo meses cortos ES
+  // Meses ES (3 letras)
   const MES = { ene:1,feb:2,mar:3,abr:4,may:5,jun:6,jul:7,ago:8,sep:9,oct:10,nov:11,dic:12 };
 
-  // Última fecha vista en la captura (se aplica a las siguientes líneas hasta que cambie)
-  let currentDateISO = todayISO();
-  const out = [];
+  // Fecha estilo "Jueves, 7 ago" / "Miércoles, 6 ago"
+  const reFecha = /(?:lunes|martes|miércoles|miercoles|jueves|viernes|sábado|sabado|domingo),?\s*(\d{1,2})\s+([a-záéíóú]{3,})/i;
 
-  // Regex de fecha tipo "Jueves, 7 ago" o "Miércoles, 6 ago"
-  const reFecha = /(?:lunes|martes|miércoles|jueves|viernes|sábado|domingo),?\s*(\d{1,2})\s+([a-záéíóú]{3,})/i;
+  // Importes: permite signo menos unicode (−), € delante o detrás, miles por punto o espacio fino
+  const reMonto = /(?:€\s*)?([+\-−]?\s?\d{1,3}(?:[.\s ]\d{3})*(?:[.,]\d{2})|\d+(?:[.,]\d{2}))(?:\s*€)?/i;
 
-  // Regex de cantidad €: "−6,30€" "59,90 €" "34,00€" … admite punto como miles.
-  const reMonto = /([+-]?\d{1,3}(?:\.\d{3})*,\d{2})\s*€?/;
+  const KEY_EXP = /(compra|pago|tarj|cargo|movil|móvil|apple|amazon|comisión|comision|tienda|bizum enviado)/i;
+  const KEY_INC = /(ingreso|abono|transferencia.*(recib|entrada)|n[oó]mina|bizum recibido)/i;
 
-  // Clasificación simple por palabras clave
-  const KEY_EXP = /(compra|pago|tarj|cargo|movil|apple|comisión|comision|tienda|bizum enviado)/i;
-  const KEY_INC = /(ingreso|abono|transferencia.*recib|nómina|nomina|bizum recibido)/i;
-
-  // Asigna categoría por heurística
   const pickCategory = (desc, isExpense) => {
     if (/super|mercadona|carre?four|aldi|lidl/i.test(desc)) return 'groceries';
     if (/corte ingles|apple|amazon|tienda|compra/i.test(desc)) return isExpense ? 'other_exp' : 'other_inc';
     if (/transfe|ingreso|abono|n[oó]mina/i.test(desc)) return isExpense ? 'other_exp' : 'salary';
-    if (/pago movil|tarj/i.test(desc)) return 'other_exp';
+    if (/pago movil|m[oó]vil|tarj/i.test(desc)) return 'other_exp';
     return isExpense ? 'other_exp' : 'other_inc';
   };
 
-  const norm = s => s.normalize('NFKC');
+  let currentDateISO = todayISO();
+  const out = [];
 
-  for (let i=0; i<lines.length; i++) {
-    const ln = norm(lines[i]);
+  for (let i=0;i<lines.length;i++){
+    const ln = lines[i].normalize('NFKC');
 
-    // Detecta fecha de cabecera
     const mF = ln.toLowerCase().match(reFecha);
-    if (mF) {
-      const d = parseInt(mF[1], 10);
-      // toma 3 primeras letras del mes (ago, sep, …)
-      const mtxt = mF[2].slice(0,3).toLowerCase();
-      const m = MES[mtxt] || new Date().getMonth()+1;
-      const y = new Date().getFullYear();
-      currentDateISO = `${y}-${String(m).padStart(2,'0')}-${String(d).padStart(2,'0')}`;
+    if (mF){
+      const d = parseInt(mF[1],10);
+      const mm = (MES[mF[2].slice(0,3).toLowerCase()] || (new Date().getMonth()+1));
+      const yy = new Date().getFullYear();
+      currentDateISO = `${yy}-${String(mm).padStart(2,'0')}-${String(d).padStart(2,'0')}`;
       continue;
     }
 
-    // Busca importe en la línea
     const mA = ln.match(reMonto);
     if (!mA) continue;
 
-    // Determina ingreso/gasto por signo o palabras
-    const raw = mA[1];
-    const isNeg = /^-/.test(raw) || KEY_EXP.test(ln);
-    const type = isNeg ? 'expense' : (KEY_INC.test(ln) ? 'income' : 'expense');
+    const raw = mA[1].replace(/\s/g,'').replace('−','-').replace(/\.(?=\d{3}\b)/g,'').replace(',', '.');
+    const cents = Math.round(parseFloat(raw)*100);
+    if (!Number.isFinite(cents) || cents<=0) continue;
 
-    const amt = parseAmountToCents(raw.replace('.', '').replace(',', '.')); // reutiliza tu parser
+    const isExpense = /^-/.test(raw) || KEY_EXP.test(ln);
+    const type = isExpense ? 'expense' : (KEY_INC.test(ln) ? 'income' : 'expense');
+
     const note = ln.replace(mA[0], '').trim().replace(/\s{2,}/g,' ');
 
     out.push({
       type,
-      amountCents: amt,
+      amountCents: cents,
       date: currentDateISO,
       merchant: note || 'Movimiento',
-      categoryId: pickCategory(note, type==='expense')
+      categoryId: pickCategory(note, isExpense)
     });
   }
 
-  // Filtra falsos positivos y duplicados triviales
-  return out.filter(t => Number.isFinite(t.amountCents) && t.amountCents > 0);
+  return out;
+}
+
+// Fallback: si no detecta fechas, al menos captura importes y usa fecha de hoy
+function parseAnyAmountsToday(text){
+  const re = /(?:€\s*)?([+\-−]?\s?\d{1,3}(?:[.\s ]\d{3})*(?:[.,]\d{2})|\d+(?:[.,]\d{2}))(?:\s*€)?/g;
+  const out=[]; let m;
+  while ((m=re.exec(text))){
+    const raw = m[1].replace(/\s/g,'').replace('−','-').replace(/\.(?=\d{3}\b)/g,'').replace(',', '.');
+    const cents = Math.round(parseFloat(raw)*100);
+    if (!Number.isFinite(cents) || cents<=0) continue;
+    const isExpense = /^-/.test(raw);
+    out.push({
+      type: isExpense ? 'expense':'expense', // por defecto gasto si no sabemos
+      amountCents: cents,
+      date: todayISO(),
+      merchant: 'Detectado por OCR',
+      categoryId: 'other_exp'
+    });
+  }
+  return out;
 }
