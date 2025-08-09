@@ -99,16 +99,27 @@ document.addEventListener('firebase-ready', () => {
   el.authInfo.textContent = `Conectado • ${user.uid.slice(0,6)}…`;
 
   import('https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js').then(({ 
-    collection, addDoc, serverTimestamp, onSnapshot, query, orderBy, where, doc, deleteDoc, updateDoc 
+    collection, addDoc, serverTimestamp, onSnapshot, query, orderBy, doc, deleteDoc, updateDoc 
   }) => {
     const col = collection(db, 'users', user.uid, 'transactions');
 
-    // Live snapshot de TODO el usuario (orden por fecha desc). Filtramos por mes en cliente.
-    const q = query(col, orderBy('date', 'desc'), orderBy('createdAt', 'desc'));
-    onSnapshot(q, snap => {
-      state.txs = snap.docs.map(d => ({ id: d.id, ...d.data() }));
-      refreshList();
-    });
+    // ✅ Ordenamos por fecha y luego por creación
+    const q = query(
+      col,
+      orderBy('date', 'desc'),
+      orderBy('createdAt', 'desc')
+    );
+
+    // Snapshot en tiempo real con manejo de error visible
+    onSnapshot(q,
+      snap => {
+        state.txs = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+        refreshList();
+      },
+      err => {
+        alert('Firestore error: ' + (err?.message || err));
+      }
+    );
 
     // Crear / actualizar
     async function saveTx(formData, editingId){
@@ -118,25 +129,29 @@ document.addEventListener('firebase-ready', () => {
         categoryId: formData.category,
         date: formData.date,
         note: formData.note || '',
-        recurring: formData.recurringFreq ? { freq: formData.recurringFreq, endsOn: formData.recurringEndsOn || null } : null,
+        recurring: formData.recurringFreq
+          ? { freq: formData.recurringFreq, endsOn: formData.recurringEndsOn || null }
+          : null,
         createdAt: serverTimestamp()
       };
+
       if (editingId){
         await updateDoc(doc(db, 'users', user.uid, 'transactions', editingId), tx);
       } else {
         await addDoc(col, tx);
-        // generar futuros si recurring
+
+        // Recurrentes
         if (tx.recurring && tx.recurring.freq){
           const ends = tx.recurring.endsOn ? new Date(tx.recurring.endsOn) : null;
           let d = new Date(tx.date);
           while(true){
             d = new Date(d);
             if (tx.recurring.freq === 'monthly') d.setMonth(d.getMonth()+1);
-            if (tx.recurring.freq === 'weekly') d.setDate(d.getDate()+7);
+            if (tx.recurring.freq === 'weekly')  d.setDate(d.getDate()+7);
             if (ends && d > ends) break;
             const future = { ...tx, date: d.toISOString().slice(0,10), recurring: null };
             await addDoc(col, future);
-            if (!ends) break; // si sin fin, solo la primera
+            if (!ends) break;
           }
         }
       }
@@ -146,7 +161,6 @@ document.addEventListener('firebase-ready', () => {
       await deleteDoc(doc(db, 'users', user.uid, 'transactions', id));
     }
 
-    // Attach global for UI handlers
     window.__actions = { saveTx, removeTx };
   });
 });
