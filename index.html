@@ -39,7 +39,18 @@
     </menu>
   </form>
 </dialog>
-<body>
+<dialog id="dlgOcr" class="sheet">
+  <h3>Importar desde imágenes</h3>
+  <div id="ocrStatus" class="sub">Listo</div>
+  <div id="ocrPreview" style="max-height:40vh; overflow:auto; margin:8px 0;"></div>
+  <menu>
+    <button type="button" id="ocrCancel">Cancelar</button>
+    <button type="button" id="ocrImport" disabled>Importar seleccionados</button>
+  </menu>
+</dialog>
+
+<!-- Tesseract.js (OCR) -->
+<script defer src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js"></script><body>
 <header class="app-bar">
   <div class="title">Cashly</div>
   <div class="spacer"></div>
