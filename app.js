@@ -607,38 +607,43 @@ function renderCandidatesForImport(candidates){
 }
 
 // === OCR: extracción de importes robusta (espacios, coma, punto, "1475€" => 14,75) ===
-function extractAmountCents(ln){
-  const s = ln.normalize('NFKC');
+// --- Detectar el primer importe de una línea y su signo ---
+function findAmountToken(line){
+  const s = line.normalize('NFKC');
 
-  // "34 00€" / "33,75€"
-  let m = s.match(/([+\-−]?)\s*(\d{1,3}(?:[.\s ]\d{3})*)([,\s]\d{2})\s*€?/);
-  if (m) {
-    const sign  = m[1] === '−' ? '-' : (m[1] || '');
+  // 34 00€, 33,75€ (con o sin separador de miles/espacio fino)
+  let r = /([-−]?)\s*(\d{1,3}(?:[.\s ]\d{3})*)([,\s]\d{2})\s*€?/g;
+  let m = r.exec(s);
+  if (m){
+    const sign = m[1] === '−' ? '-' : (m[1] || '');
     const euros = m[2].replace(/[.\s ]/g,'');
     const cents = m[3].replace(/[,\s]/g,'');
-    return Math.round(parseFloat(`${sign}${euros}.${cents}`)*100);
+    return { cents: Math.round(parseFloat(`${sign}${euros}.${cents}`)*100), negative: sign === '-' };
   }
 
-  // "14,75" o "14.75"
-  m = s.match(/([+\-−]?)\s*(\d+)[.,](\d{2})\s*€?/);
-  if (m) {
+  // 14,75€ o 14.75€
+  r = /([-−]?)\s*(\d+)[.,](\d{2})\s*€?/g;
+  m = r.exec(s);
+  if (m){
     const sign = m[1] === '−' ? '-' : (m[1] || '');
-    return Math.round(parseFloat(`${sign}${m[2]}.${m[3]}`)*100);
+    return { cents: Math.round(parseFloat(`${sign}${m[2]}.${m[3]}`)*100), negative: sign === '-' };
   }
 
-  // "1475€" => 14,75€
-  m = s.match(/([+\-−]?)\s*(\d{3,})\s*€/);
-  if (m) {
-    const sign   = m[1] === '−' ? '-' : (m[1] || '');
+  // 1475€ => 14,75€
+  r = /([-−]?)\s*(\d{3,})\s*€/g;
+  m = r.exec(s);
+  if (m){
+    const sign = m[1] === '−' ? '-' : (m[1] || '');
     const digits = m[2];
-    const euros  = digits.slice(0,-2) || '0';
-    const cents  = digits.slice(-2);
-    return Math.round(parseFloat(`${sign}${euros}.${cents}`)*100);
+    const euros = digits.slice(0, -2) || '0';
+    const cents = digits.slice(-2);
+    return { cents: Math.round(parseFloat(`${sign}${euros}.${cents}`)*100), negative: sign === '-' };
   }
-  return NaN;
+
+  return null;
 }
 
-// === Parser principal: soporta múltiples días y clasifica ingresos/gastos ===
+// === Parser principal: SOLO por signo ===
 function parseBankTextToTx(text){
   if (!text) return [];
   const lines = text.split(/\r?\n/).map(s => s.trim()).filter(Boolean);
@@ -667,49 +672,47 @@ function parseBankTextToTx(text){
       continue;
     }
 
-    const cents = extractAmountCents(ln);
-    if (!Number.isFinite(cents) || cents <= 0){
-      if (/[A-Za-zÁÉÍÓÚáéíóúñÑ]/.test(ln)) lastDesc = ln;
+    const tok = findAmountToken(ln);
+    if (!tok || !Number.isFinite(tok.cents) || Math.abs(tok.cents) === 0){
+      if (/[A-Za-zÁÉÍÓÚáéíóúñÑ]/.test(ln)) lastDesc = ln; // posible descripción para la siguiente línea
       continue;
     }
 
-    // SOLO por signo del importe (en la línea del importe)
-    const isNegative = /(^|[^0-9])[-−]\s?\d/.test(ln);
-    const type = isNegative ? 'expense' : 'income';
+    // Tipo SOLO por el signo del importe
+    const type = tok.negative ? 'expense' : 'income';
+    const amountCents = Math.abs(tok.cents); // guardamos siempre positivo
 
-    // Nota: lo que queda antes del importe; si queda vacío, usa la línea previa
+    // Nota: texto antes del importe; si queda vacío, usa la descripción previa
     let note = ln.replace(/\s*[€]?\s*[\d\s.,−-]{3,}\s*€?\s*$/, '').trim();
     if (note.length < 4 && lastDesc) note = lastDesc;
 
-    // Categoría neutra (puedes mantener tus reglas si quieres)
-    const categoryId = type === 'expense' ? 'other_exp' : 'other_inc';
-
     out.push({
       type,
-      amountCents: cents,
+      amountCents,
       date: currentDateISO || todayISO(),
       merchant: note || 'Movimiento',
-      categoryId
+      categoryId: type === 'expense' ? 'other_exp' : 'other_inc'
     });
   }
 
   return out;
 }
 
+// Fallback: si no hay fechas, usa HOY. También SOLO por signo.
 function parseAnyAmountsToday(text){
   const out=[]; 
   const lines = text.split(/\r?\n/).map(s=>s.trim()).filter(Boolean);
-  for (const lnRaw of lines){
-    const ln = lnRaw.normalize('NFKC');
-    const cents = extractAmountCents(ln);
-    if (Number.isFinite(cents) && cents>0){
-      const isNegative = /(^|[^0-9])[-−]\s?\d/.test(ln);
+  for (const raw of lines){
+    const ln = raw.normalize('NFKC');
+    const tok = findAmountToken(ln);
+    if (tok && Number.isFinite(tok.cents) && Math.abs(tok.cents)>0){
+      const type = tok.negative ? 'expense' : 'income';
       out.push({
-        type: isNegative ? 'expense' : 'income',
-        amountCents: cents,
+        type,
+        amountCents: Math.abs(tok.cents),
         date: todayISO(),
         merchant: 'Detectado por OCR',
-        categoryId: isNegative ? 'other_exp' : 'other_inc'
+        categoryId: type === 'expense' ? 'other_exp' : 'other_inc'
       });
     }
   }
