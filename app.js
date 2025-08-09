@@ -391,12 +391,6 @@ el.fileImport.addEventListener('change', async (e) => {
   }
 });
 
-document.getElementById('btnLogout').addEventListener('click', async () => {
-  const { signOut } = await import('https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js');
-  await signOut(window.__auth);
-  location.reload();
-});
-
 document.getElementById('btnCancel').addEventListener('click', () => {
   el.dlg.close();
 });
