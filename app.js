@@ -471,3 +471,181 @@ btnLogout?.addEventListener('click', async () => {
     alert('Error al cerrar sesión: ' + (e?.message || e));
   }
 });
+
+// ======== OCR: importar movimientos desde imágenes ========
+const btnOcr = document.getElementById('btnOcr');
+const ocrFiles = document.getElementById('ocrFiles');
+const dlgOcr = document.getElementById('dlgOcr');
+const ocrStatus = document.getElementById('ocrStatus');
+const ocrPreview = document.getElementById('ocrPreview');
+const btnOcrImport = document.getElementById('ocrImport');
+const btnOcrCancel = document.getElementById('ocrCancel');
+
+btnOcr?.addEventListener('click', () => ocrFiles.click());
+btnOcrCancel?.addEventListener?.('click', () => dlgOcr.close());
+ocrFiles?.addEventListener('change', async (e) => {
+  if (!e.target.files?.length) return;
+  dlgOcr.showModal();
+  ocrStatus.textContent = `Procesando ${e.target.files.length} imagen(es)…`;
+  btnOcrImport.disabled = true;
+  ocrPreview.innerHTML = 'Leyendo…';
+
+  try {
+    const results = [];
+    // OCR de cada imagen (español). langPath trae datos 'spa' gratis.
+    for (const file of e.target.files) {
+      const { data } = await Tesseract.recognize(file, 'spa', {
+        logger: m => (ocrStatus.textContent = `${m.status} ${Math.round((m.progress||0)*100)}%`),
+        langPath: 'https://tessdata.projectnaptha.com/4.0.0' // contiene spa.traineddata
+      });
+      results.push({ file, text: data.text || '' });
+    }
+
+    // Parsear todos los textos a "transacciones" candidatas
+    const candidates = [];
+    for (const r of results) {
+      const parsed = parseBankTextToTx(r.text);
+      candidates.push(...parsed);
+    }
+
+    if (!candidates.length) {
+      ocrPreview.innerHTML = '<p>No se reconocieron movimientos. Asegúrate de que las capturas sean nítidas.</p>';
+      btnOcrImport.disabled = true;
+      return;
+    }
+
+    // Render de pre‑visualización con checkboxes
+    ocrPreview.innerHTML = '';
+    const list = document.createElement('ul');
+    list.style.listStyle = 'none';
+    list.style.padding = '0';
+
+    candidates.forEach((tx, i) => {
+      const li = document.createElement('li');
+      li.style.margin = '6px 0';
+      li.style.padding = '8px';
+      li.style.border = '1px solid #334155';
+      li.style.borderRadius = '8px';
+      const sign = tx.type === 'expense' ? '-' : '+';
+      li.innerHTML = `
+        <label style="display:flex; gap:8px; align-items:center;">
+          <input type="checkbox" data-i="${i}" checked>
+          <div style="flex:1">
+            <div><strong>${tx.note || tx.merchant || 'Movimiento'}</strong></div>
+            <div style="opacity:.8">${tx.date} · ${tx.category || '—'}</div>
+          </div>
+          <div><strong>${sign}${centsToEUR(tx.amountCents).replace('€','').trim()} €</strong></div>
+        </label>
+      `;
+      list.appendChild(li);
+    });
+
+    ocrPreview.appendChild(list);
+    btnOcrImport.disabled = false;
+
+    btnOcrImport.onclick = async () => {
+      const checks = ocrPreview.querySelectorAll('input[type="checkbox"]');
+      const toImport = [];
+      checks.forEach(ch => {
+        if (ch.checked) toImport.push(candidates[Number(ch.dataset.i)]);
+      });
+      if (!toImport.length) { alert('No hay elementos seleccionados'); return; }
+
+      // Alta en Firestore, reutilizando saveTx
+      ocrStatus.textContent = `Importando ${toImport.length}…`;
+      btnOcrImport.disabled = true;
+
+      for (const tx of toImport) {
+        await window.__actions.saveTx({
+          type: tx.type,
+          amountCents: tx.amountCents,
+          category: tx.categoryId || tx.category || 'other_exp',
+          date: tx.date,
+          note: tx.note || tx.merchant || ''
+        }, null);
+      }
+      ocrStatus.textContent = 'Importación completada';
+      setTimeout(()=> dlgOcr.close(), 600);
+    };
+
+  } catch (e2) {
+    alert('Error OCR: ' + (e2?.message || e2));
+    dlgOcr.close();
+  } finally {
+    ocrFiles.value = '';
+  }
+});
+
+// ======== Parser para texto OCR (español, estilo apps bancarias) ========
+// Heurísticas básicas para: fechas, importes y tipo (ingreso/gasto).
+function parseBankTextToTx(text) {
+  if (!text) return [];
+  const lines = text.split(/\r?\n/).map(s => s.trim()).filter(Boolean);
+
+  // Mapeo meses cortos ES
+  const MES = { ene:1,feb:2,mar:3,abr:4,may:5,jun:6,jul:7,ago:8,sep:9,oct:10,nov:11,dic:12 };
+
+  // Última fecha vista en la captura (se aplica a las siguientes líneas hasta que cambie)
+  let currentDateISO = todayISO();
+  const out = [];
+
+  // Regex de fecha tipo "Jueves, 7 ago" o "Miércoles, 6 ago"
+  const reFecha = /(?:lunes|martes|miércoles|jueves|viernes|sábado|domingo),?\s*(\d{1,2})\s+([a-záéíóú]{3,})/i;
+
+  // Regex de cantidad €: "−6,30€" "59,90 €" "34,00€" … admite punto como miles.
+  const reMonto = /([+-]?\d{1,3}(?:\.\d{3})*,\d{2})\s*€?/;
+
+  // Clasificación simple por palabras clave
+  const KEY_EXP = /(compra|pago|tarj|cargo|movil|apple|comisión|comision|tienda|bizum enviado)/i;
+  const KEY_INC = /(ingreso|abono|transferencia.*recib|nómina|nomina|bizum recibido)/i;
+
+  // Asigna categoría por heurística
+  const pickCategory = (desc, isExpense) => {
+    if (/super|mercadona|carre?four|aldi|lidl/i.test(desc)) return 'groceries';
+    if (/corte ingles|apple|amazon|tienda|compra/i.test(desc)) return isExpense ? 'other_exp' : 'other_inc';
+    if (/transfe|ingreso|abono|n[oó]mina/i.test(desc)) return isExpense ? 'other_exp' : 'salary';
+    if (/pago movil|tarj/i.test(desc)) return 'other_exp';
+    return isExpense ? 'other_exp' : 'other_inc';
+  };
+
+  const norm = s => s.normalize('NFKC');
+
+  for (let i=0; i<lines.length; i++) {
+    const ln = norm(lines[i]);
+
+    // Detecta fecha de cabecera
+    const mF = ln.toLowerCase().match(reFecha);
+    if (mF) {
+      const d = parseInt(mF[1], 10);
+      // toma 3 primeras letras del mes (ago, sep, …)
+      const mtxt = mF[2].slice(0,3).toLowerCase();
+      const m = MES[mtxt] || new Date().getMonth()+1;
+      const y = new Date().getFullYear();
+      currentDateISO = `${y}-${String(m).padStart(2,'0')}-${String(d).padStart(2,'0')}`;
+      continue;
+    }
+
+    // Busca importe en la línea
+    const mA = ln.match(reMonto);
+    if (!mA) continue;
+
+    // Determina ingreso/gasto por signo o palabras
+    const raw = mA[1];
+    const isNeg = /^-/.test(raw) || KEY_EXP.test(ln);
+    const type = isNeg ? 'expense' : (KEY_INC.test(ln) ? 'income' : 'expense');
+
+    const amt = parseAmountToCents(raw.replace('.', '').replace(',', '.')); // reutiliza tu parser
+    const note = ln.replace(mA[0], '').trim().replace(/\s{2,}/g,' ');
+
+    out.push({
+      type,
+      amountCents: amt,
+      date: currentDateISO,
+      merchant: note || 'Movimiento',
+      categoryId: pickCategory(note, type==='expense')
+    });
+  }
+
+  // Filtra falsos positivos y duplicados triviales
+  return out.filter(t => Number.isFinite(t.amountCents) && t.amountCents > 0);
+}
